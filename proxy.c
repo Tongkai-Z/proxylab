@@ -9,8 +9,9 @@
 static const char *user_agent_hdr = "Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 void doProxy(int connfd);
 void parse_url(char *url, char *host, char *uri);
-void get_requesthdrs(rio_t *riop, char *host); 
+void send_request(rio_t *riop, char *host, int clientfd, char *requestline);
 void scan_hdr(char *buf, char *key, char *val);
+void send_data(int clientfd, int connfd);
 
 int main(int argc, char **argv)
 {
@@ -42,6 +43,9 @@ void doProxy(int connfd)
 {   
     char buf[MAXLINE], method[MAXLINE], url[MAXLINE], version[MAXLINE], host[MAXLINE], uri[MAXLINE];
     rio_t rio;
+    char *colon, requestline[MAXLINE], port[MAXLINE];
+    int clientfd;
+    
     // parse the request line
     Rio_readinitb(&rio, connfd);
     if (!Rio_readlineb(&rio, buf, MAXLINE)) // read the request line
@@ -51,8 +55,20 @@ void doProxy(int connfd)
     // GET http://www.cmu.edu/hub/index.html HTTP/1.1
     strcpy(version, "HTTP/1.0");//always forward 1.1
     parse_url(url, host, uri);
-    printf("host: %s, uri: %s version: %s\r\n", host, uri, version);
-    get_requesthdrs(&rio, host);
+    //connect the proxy to host
+    colon = index(host, ':');
+    if (colon){
+        strcpy(port, colon + 1);
+        *colon = '\0';
+    } else {
+        strcpy(port, "80");
+    }
+    printf("host: %s, port: %s, uri: %s version: %s\r\n", host, port, uri, version);
+    sprintf(requestline, "%s %s %s", method, uri, version);
+    clientfd = Open_clientfd(host, port);
+    send_request(&rio, host, clientfd, requestline);
+    send_data(clientfd, connfd);
+    Close(clientfd);
 }
 
 void parse_url(char *url, char *host, char *uri)
@@ -63,18 +79,21 @@ void parse_url(char *url, char *host, char *uri)
     doubleSlash = strstr(url, "//");  
     if (doubleSlash){
         slash = strstr(doubleSlash + 2, "/");// first '/' after '//'
+        // host = doubleSlash + 2;//bug reassign host in local scale
+        strcpy(uri, "/");
         if (slash) {
-            strcpy(uri, "/");
             strcat(uri, slash + 1);
             *slash = '\0';
         }
-        // host = doubleSlash + 2;//bug reassign host in local scale
         strcpy(host, doubleSlash + 2);
+    } else { //localhost, e.g. GET / HTTP/1.1
+        strcpy(host, "localhost");
+        strcpy(uri, url);
     }
-    
 }
 
-void get_requesthdrs(rio_t *riop, char *host)
+/*send headers from rio to clientfd*/
+void send_request(rio_t *riop, char *host, int clientfd, char *requestline)
 {
     char buf[MAXLINE], key[MAXLINE], val[MAXLINE];
     
@@ -82,7 +101,8 @@ void get_requesthdrs(rio_t *riop, char *host)
     int has_user_agent = 0;
     int has_connection = 0;
     int has_proxy_connection = 0;
-
+    // send the requestline
+    Rio_writen(clientfd, requestline, strlen(requestline));
     Rio_readlineb(riop, buf, MAXLINE);
     /*HOST/User-Agent/Connection/Proxy-Connection*/
     while(strcmp(buf, "\r\n")) {       
@@ -103,22 +123,28 @@ void get_requesthdrs(rio_t *riop, char *host)
             strcpy(val, "close\r\n");
         }
         sprintf(buf, "%s: %s", key, val);
-        printf("%s", buf);
+        Rio_writen(clientfd, buf, strlen(buf));
         Rio_readlineb(riop, buf, MAXLINE);
     }
     if (!has_host) {
-        printf("HOST: %s\r\n", host);
+        sprintf(buf, "HOST: %s\r\n", host);
+        Rio_writen(clientfd, buf, strlen(buf));
     }
     if (!has_user_agent) {
-        printf("User-Agent: %s", user_agent_hdr);
+        sprintf(buf, "User-Agent: %s", user_agent_hdr);
+        Rio_writen(clientfd, buf, strlen(buf));
     } 
     if (!has_connection) {
-        printf("Connection: %s\r\n", "close");
+        sprintf(buf, "Connection: %s\r\n", "close");
+        Rio_writen(clientfd, buf, strlen(buf));
     } 
     if (!has_proxy_connection) {
-        printf("Proxy-Connection: %s\r\n", "close");
+        sprintf(buf, "Proxy-Connection: %s\r\n", "close");
+        Rio_writen(clientfd, buf, strlen(buf));
     }
-    printf("%s", "\r\n");//end of request
+    sprintf(buf, "%s", "\r\n");//end of request
+    Rio_writen(clientfd, buf, strlen(buf));
+    printf("sending all data from client\n");
 }
 
 void scan_hdr(char *buf, char *key, char *val)
@@ -128,4 +154,20 @@ void scan_hdr(char *buf, char *key, char *val)
     *colon = '\0';
     strcpy(val, colon + 2);
     strcpy(key, buf);
+}
+
+/*send the data read from clientfd to the connfd*/
+void send_data(int clientfd, int connfd)
+{
+    rio_t rio;
+    size_t n;
+
+    Rio_readinitb(&rio, clientfd);
+    char buf[MAXLINE];
+    while ((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0)
+    {
+        printf("proxy server received %d bytes from end point\n", (int)n);
+        Rio_writen(connfd, buf, strlen(buf));
+    }
+    printf("sending data back to client finished");
 }
