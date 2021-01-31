@@ -1,4 +1,4 @@
-#CS:APP Proxy Lab
+# CS:APP Proxy Lab
 
 
 This directory contains the files you will need for the CS:APP Proxy
@@ -44,17 +44,20 @@ nop-server.py
 tiny
     Tiny Web server from the CS:APP text
 
-##Implementation
+## Implementation
 
 
-###Concurrency
+### Concurrency
+
 Use thread-pool model to manage the thread resource. 
 
-###Cache
+### Cache
+
 Simple cache using doubly linked list to implement the approximate LRU. 
 Use favor-readers read-write lock to guarantee the thread-safe for get and set
 
-##Result
+## Result
+
 *** Basic ***
 Starting tiny on 3716
 Starting proxy on 3717
