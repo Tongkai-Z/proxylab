@@ -183,13 +183,15 @@ void send_data(int clientfd, int connfd)
 {
     rio_t rio;
     size_t n;
-
     Rio_readinitb(&rio, clientfd);
-    char buf[MAXLINE];
-    while ((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0)
+    char buf[RIO_BUFSIZE];
+    // bug: user readline to read jpg or binary?
+    // use rio_readnb to read RIO_BUFSIZE
+    while ((n = Rio_readnb(&rio, buf, RIO_BUFSIZE)) != 0)
     {
         printf("proxy server received %d bytes from end point\n", (int)n);
-        Rio_writen(connfd, buf, strlen(buf));
+        // write n
+        Rio_writen(connfd, buf, n);
     }
     printf("sending data back to client finished");
 }
